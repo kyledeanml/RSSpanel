@@ -30,6 +30,18 @@
       "pub": 1794372770.602781,
       "url": "https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Blue.Grunge.mp4"
     },
+    "Choir.mp4": {
+      "pub": 1794597379.3568997,
+      "url": "https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Choir.mp4"
+    },
+    "Country Country.mp4": {
+      "pub": 1794511220.324958,
+      "url": "https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Country.Country.mp4"
+    },
+    "Echo.mp4": {
+      "pub": 1794874936.2960753,
+      "url": "https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Echo.mp4"
+    },
     "Full Stack.mp4": {
       "pub": 1794221567.860116,
       "url": "https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Full.Stack.mp4"
@@ -37,6 +49,10 @@
     "Gambling.mp4": {
       "pub": 1794217900.8517826,
       "url": "https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Gambling.mp4"
+    },
+    "Gutbucket.mp4": {
+      "pub": 1794874201.4939902,
+      "url": "https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Gutbucket.mp4"
     },
     "Hot House.mp4": {
       "pub": 1794440932.0582364,
@@ -50,11 +66,23 @@
       "pub": 1794176015.7350612,
       "url": "https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Keep.On.Lookin.mp4"
     },
+    "Locomotive.mp4": {
+      "pub": 1794873133.833407,
+      "url": "https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Locomotive.mp4"
+    },
     "Long Gone.mp4": {
       "description": "Daily track selection: Long Gone",
       "pub": 1794254343.799275,
       "title": "Long Gone",
       "url": "https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Long.Gone.mp4"
+    },
+    "Muddy.mp4": {
+      "pub": 1794596601.9808187,
+      "url": "https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Muddy.mp4"
+    },
+    "Night Swing.mp4": {
+      "pub": 1794870806.59658,
+      "url": "https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Night.Swing.mp4"
     },
     "No Money (Whiskey Woman).mp4": {
       "pub": 1794177267.3148205,
@@ -67,6 +95,34 @@
     "Ragged Edge.mp4": {
       "pub": 1794428668.1552825,
       "url": "https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Ragged.Edge.mp4"
+    },
+    "Saturated.mp4": {
+      "pub": 1794771267.306197,
+      "url": "https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Saturated.mp4"
+    },
+    "Shuffled.mp4": {
+      "pub": 1794687943.9016542,
+      "url": "https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Shuffled.mp4"
+    },
+    "Slap & Squeal.mp4": {
+      "pub": 1794688583.8437667,
+      "url": "https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Slap%20%26%20Squeal.mp4"
+    },
+    "Slow Day.mp4": {
+      "pub": 1794510377.0741801,
+      "url": "https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Slow.Day.mp4"
+    },
+    "Stack Revival.mp4": {
+      "pub": 1794772348.00561,
+      "url": "https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Stack.Revival.mp4"
+    },
+    "Stone Room.mp4": {
+      "pub": 1794773477.408178,
+      "url": "https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Stone.Room.mp4"
+    },
+    "Wire Stomp.mp4": {
+      "pub": 1794780997.5280144,
+      "url": "https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Wire.Stomp.mp4"
     }
   }
 }

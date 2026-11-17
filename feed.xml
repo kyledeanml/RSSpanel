@@ -5,7 +5,7 @@
     <link>https://kyledeanml.github.io/RSSpanel</link>
     <language>en-us</language>
     <description>Daily streaming blues instrumentals video &amp; audio podcast feed.</description>
-    <lastBuildDate>Wed, 11 Nov 2026 23:55:04 GMT</lastBuildDate>
+    <lastBuildDate>Tue, 17 Nov 2026 00:26:12 GMT</lastBuildDate>
     <generator>RSSpanel</generator>
     <itunes:author>Dean</itunes:author>
     <itunes:image href="https://kyledeanml.github.io/RSSpanel/cover.jpg" />
@@ -16,6 +16,118 @@
     </image>
     <itunes:category text="Music" />
     <itunes:explicit>false</itunes:explicit>
+    <item>
+      <title>Echo</title>
+      <description>Daily track selection: Echo</description>
+      <pubDate>Tue, 17 Nov 2026 00:22:16 GMT</pubDate>
+      <enclosure url="https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Echo.mp4" length="142247681" type="video/mp4" />
+      <guid isPermaLink="false">https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Echo.mp4</guid>
+      <itunes:duration>00:03:00</itunes:duration>
+    </item>
+    <item>
+      <title>Gutbucket</title>
+      <description>Daily track selection: Gutbucket</description>
+      <pubDate>Tue, 17 Nov 2026 00:10:01 GMT</pubDate>
+      <enclosure url="https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Gutbucket.mp4" length="140465359" type="video/mp4" />
+      <guid isPermaLink="false">https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Gutbucket.mp4</guid>
+      <itunes:duration>00:02:58</itunes:duration>
+    </item>
+    <item>
+      <title>Locomotive</title>
+      <description>Daily track selection: Locomotive</description>
+      <pubDate>Mon, 16 Nov 2026 23:52:13 GMT</pubDate>
+      <enclosure url="https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Locomotive.mp4" length="144730399" type="video/mp4" />
+      <guid isPermaLink="false">https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Locomotive.mp4</guid>
+      <itunes:duration>00:03:02</itunes:duration>
+    </item>
+    <item>
+      <title>Night Swing</title>
+      <description>Daily track selection: Night Swing</description>
+      <pubDate>Mon, 16 Nov 2026 23:13:26 GMT</pubDate>
+      <enclosure url="https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Night.Swing.mp4" length="136638043" type="video/mp4" />
+      <guid isPermaLink="false">https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Night.Swing.mp4</guid>
+      <itunes:duration>00:02:52</itunes:duration>
+    </item>
+    <item>
+      <title>Wire Stomp</title>
+      <description>Daily track selection: Wire Stomp</description>
+      <pubDate>Sun, 15 Nov 2026 22:16:37 GMT</pubDate>
+      <enclosure url="https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Wire.Stomp.mp4" length="143099397" type="video/mp4" />
+      <guid isPermaLink="false">https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Wire.Stomp.mp4</guid>
+      <itunes:duration>00:03:00</itunes:duration>
+    </item>
+    <item>
+      <title>Stone Room</title>
+      <description>Daily track selection: Stone Room</description>
+      <pubDate>Sun, 15 Nov 2026 20:11:17 GMT</pubDate>
+      <enclosure url="https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Stone.Room.mp4" length="140859674" type="video/mp4" />
+      <guid isPermaLink="false">https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Stone.Room.mp4</guid>
+      <itunes:duration>00:02:58</itunes:duration>
+    </item>
+    <item>
+      <title>Stack Revival</title>
+      <description>Daily track selection: Stack Revival</description>
+      <pubDate>Sun, 15 Nov 2026 19:52:28 GMT</pubDate>
+      <enclosure url="https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Stack.Revival.mp4" length="142066666" type="video/mp4" />
+      <guid isPermaLink="false">https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Stack.Revival.mp4</guid>
+      <itunes:duration>00:02:58</itunes:duration>
+    </item>
+    <item>
+      <title>Saturated</title>
+      <description>Daily track selection: Saturated</description>
+      <pubDate>Sun, 15 Nov 2026 19:34:27 GMT</pubDate>
+      <enclosure url="https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Saturated.mp4" length="144733988" type="video/mp4" />
+      <guid isPermaLink="false">https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Saturated.mp4</guid>
+      <itunes:duration>00:03:02</itunes:duration>
+    </item>
+    <item>
+      <title>Slap &amp; Squeal</title>
+      <description>Daily track selection: Slap &amp; Squeal</description>
+      <pubDate>Sat, 14 Nov 2026 20:36:23 GMT</pubDate>
+      <enclosure url="https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Slap%20%26%20Squeal.mp4" length="144422206" type="video/mp4" />
+      <guid isPermaLink="false">https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Slap%20%26%20Squeal.mp4</guid>
+      <itunes:duration>00:03:00</itunes:duration>
+    </item>
+    <item>
+      <title>Shuffled</title>
+      <description>Daily track selection: Shuffled</description>
+      <pubDate>Sat, 14 Nov 2026 20:25:43 GMT</pubDate>
+      <enclosure url="https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Shuffled.mp4" length="138473046" type="video/mp4" />
+      <guid isPermaLink="false">https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Shuffled.mp4</guid>
+      <itunes:duration>00:02:54</itunes:duration>
+    </item>
+    <item>
+      <title>Choir</title>
+      <description>Daily track selection: Choir</description>
+      <pubDate>Fri, 13 Nov 2026 19:16:19 GMT</pubDate>
+      <enclosure url="https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Choir.mp4" length="139137645" type="video/mp4" />
+      <guid isPermaLink="false">https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Choir.mp4</guid>
+      <itunes:duration>00:02:57</itunes:duration>
+    </item>
+    <item>
+      <title>Muddy</title>
+      <description>Daily track selection: Muddy</description>
+      <pubDate>Fri, 13 Nov 2026 19:03:21 GMT</pubDate>
+      <enclosure url="https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Muddy.mp4" length="139599385" type="video/mp4" />
+      <guid isPermaLink="false">https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Muddy.mp4</guid>
+      <itunes:duration>00:02:57</itunes:duration>
+    </item>
+    <item>
+      <title>Country Country</title>
+      <description>Daily track selection: Country Country</description>
+      <pubDate>Thu, 12 Nov 2026 19:20:20 GMT</pubDate>
+      <enclosure url="https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Country.Country.mp4" length="133542489" type="video/mp4" />
+      <guid isPermaLink="false">https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Country.Country.mp4</guid>
+      <itunes:duration>00:03:00</itunes:duration>
+    </item>
+    <item>
+      <title>Slow Day</title>
+      <description>Daily track selection: Slow Day</description>
+      <pubDate>Thu, 12 Nov 2026 19:06:17 GMT</pubDate>
+      <enclosure url="https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Slow.Day.mp4" length="125668691" type="video/mp4" />
+      <guid isPermaLink="false">https://github.com/kyledeanml/RSSpanel/releases/download/episodes/Slow.Day.mp4</guid>
+      <itunes:duration>00:02:47</itunes:duration>
+    </item>
     <item>
       <title>Hot House</title>
       <description>Daily track selection: Hot House</description>

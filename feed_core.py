@@ -12,6 +12,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import wave
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -518,11 +519,20 @@ def sync_github(folder: Path, log_fn=print) -> bool:
                     break
             if need_upload:
                 log_fn(f"Uploading {t.name} ({fmt_size(t.size)}) to GitHub Release '{tag}'...")
-                up = subprocess.run(
-                    ["gh", "release", "upload", tag, str(t.path), "--clobber", "--repo", repo],
-                    cwd=str(folder), capture_output=True, text=True, check=False)
-                if up.returncode != 0:
-                    log_fn(f"Upload failed for {t.name}: {up.stderr.strip()}")
+                max_retries = 3
+                up_success = False
+                for attempt in range(1, max_retries + 1):
+                    up = subprocess.run(
+                        ["gh", "release", "upload", tag, str(t.path), "--clobber", "--repo", repo],
+                        cwd=str(folder), capture_output=True, text=True, check=False)
+                    if up.returncode == 0:
+                        up_success = True
+                        break
+                    log_fn(f"Upload attempt {attempt}/{max_retries} failed for {t.name}: {up.stderr.strip()}")
+                    if attempt < max_retries:
+                        time.sleep(2 * attempt)
+                if not up_success:
+                    log_fn(f"Upload permanently failed for {t.name}")
                     return False
                 # Re-query release assets to get exact browser_download_url (gh normalizes spaces to dots)
                 q = subprocess.run(
@@ -540,6 +550,7 @@ def sync_github(folder: Path, log_fn=print) -> bool:
                         pass
                 ov["url"] = asset_url
                 log_fn(f"Uploaded -> {ov['url']}")
+                save_config(folder, cfg)
 
     # 3. Save updated config and regenerate feed.xml + index.html
     save_config(folder, cfg)
