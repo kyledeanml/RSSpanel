@@ -565,7 +565,11 @@ class RSSpanelWindow(Gtk.ApplicationWindow):
     def _feed_path(self):
         if not self.folder:
             return None
-        return os.path.join(self.folder, self.cfg.get("output_name") or "feed.xml")
+        try:
+            out_name = feed_core.sanitize_output_name(self.cfg.get("output_name") or "feed.xml")
+        except ValueError:
+            out_name = "feed.xml"
+        return os.path.join(self.folder, out_name)
 
     # --------------------------------------------------------------------------
     # Main area: Tracks / feed.xml / Log
@@ -1075,6 +1079,14 @@ class RSSpanelWindow(Gtk.ApplicationWindow):
                     Gio.File.new_for_path(str(f)).trash(None)
                 self.log(f"Moved to trash: {', '.join(f.name for f in files)}")
             elif resp == Gtk.ResponseType.OK and new_stem and new_stem != t.path.stem:
+                if (
+                    "\x00" in new_stem
+                    or "/" in new_stem
+                    or "\\" in new_stem
+                    or ".." in new_stem
+                    or new_stem.startswith(".")
+                ):
+                    raise OSError("Invalid track filename: path separators and leading dots are not allowed.")
                 ov = self.cfg.get("tracks", {})
                 for f in files:
                     new = f.with_name(new_stem + f.suffix)
@@ -1098,15 +1110,18 @@ class RSSpanelWindow(Gtk.ApplicationWindow):
     # Playback (GStreamer)
     # --------------------------------------------------------------------------
     def _init_player(self):
+        self._bus_watch_added = False
+        self._play_pos_timer_id = None
         if Gst is None:
             return
         self._player = Gst.ElementFactory.make("playbin", "rsspanel-player")
         if self._player:
             bus = self._player.get_bus()
             bus.add_signal_watch()
+            self._bus_watch_added = True
             bus.connect("message::eos", lambda *a: self.stop_playback())
             bus.connect("message::error", self._on_player_error)
-            GLib.timeout_add(500, self._update_play_position)
+            self._play_pos_timer_id = GLib.timeout_add(500, self._update_play_position)
 
     def toggle_play(self, force_play=False):
         if self._player is None:
@@ -1407,10 +1422,26 @@ class RSSpanelWindow(Gtk.ApplicationWindow):
 
     def _on_delete_event(self, *_):
         self.stop_playback()
+        if getattr(self, "_play_pos_timer_id", None):
+            GLib.source_remove(self._play_pos_timer_id)
+            self._play_pos_timer_id = None
+        if getattr(self, "_regen_timeout", None):
+            GLib.source_remove(self._regen_timeout)
+            self._regen_timeout = None
+        if self._player and getattr(self, "_bus_watch_added", False):
+            try:
+                bus = self._player.get_bus()
+                if bus:
+                    bus.remove_signal_watch()
+            except Exception:
+                pass
+            self._bus_watch_added = False
         if self._server:
             self._stop_server()
         if self._monitor:
             self._monitor.cancel()
+        if getattr(self, "_sub_monitor", None):
+            self._sub_monitor.cancel()
         return False
 
 

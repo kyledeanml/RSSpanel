@@ -8,10 +8,14 @@ tested and used from the command line:
 """
 
 import json
+import math
 import os
+import re
 import shutil
+import stat
 import subprocess
 import sys
+import tempfile
 import time
 import wave
 from dataclasses import dataclass, field
@@ -19,7 +23,7 @@ from datetime import datetime, timezone
 from email.utils import format_datetime
 from pathlib import Path
 from typing import Dict, List, Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 from xml.sax.saxutils import escape
 
 try:
@@ -90,6 +94,127 @@ class Track:
 
 
 # ----------------------------------------------------------------------------
+# Security & Integrity Helpers
+# ----------------------------------------------------------------------------
+_XML_ILLEGAL_CTRL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_GITHUB_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+_GITHUB_TAG_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+_BITRATE_RE = re.compile(r"^\d{2,3}[kKmM]$")
+_ATTR_ENTITIES = {'"': "&quot;", "'": "&#39;"}
+
+
+def _xml_escape(value: object) -> str:
+    """Escape text for XML/HTML element bodies after stripping illegal XML 1.0 control chars."""
+    cleaned = _XML_ILLEGAL_CTRL_RE.sub("", str(value or ""))
+    return escape(cleaned)
+
+
+def _attr_escape(value: object) -> str:
+    """Escape text for double- or single-quoted XML/HTML attributes."""
+    cleaned = _XML_ILLEGAL_CTRL_RE.sub("", str(value or ""))
+    return escape(cleaned, _ATTR_ENTITIES)
+
+
+def sanitize_public_url(url: str) -> str:
+    """Allow http://, https://, or relative paths; reject javascript:, data:, file:, or control chars."""
+    raw = _XML_ILLEGAL_CTRL_RE.sub("", (url or "").strip())
+    if not raw:
+        return ""
+    parsed = urlparse(raw)
+    if parsed.scheme:
+        if parsed.scheme.lower() not in ("http", "https"):
+            return ""
+        if not parsed.netloc:
+            return ""
+    return raw
+
+
+def sanitize_output_name(output_name: str) -> str:
+    """Validate feed output filename to prevent path traversal outside the feed folder."""
+    name = (output_name or "feed.xml").strip()
+    if (
+        not name
+        or "\x00" in name
+        or "/" in name
+        or "\\" in name
+        or ".." in name
+        or name.startswith(".")
+        or name.startswith("-")
+    ):
+        raise ValueError(f"Unsafe feed output_name: {output_name!r}")
+    if not name.lower().endswith((".xml", ".rss")):
+        raise ValueError(f"Feed output_name must end with .xml or .rss: {output_name!r}")
+    return name
+
+
+def validate_github_repo(repo: str) -> str:
+    """Validate GitHub owner/repo identifier to prevent gh CLI flag injection."""
+    cleaned = (repo or "").strip()
+    if (
+        not cleaned
+        or "\x00" in cleaned
+        or cleaned.startswith("-")
+        or ".." in cleaned
+        or not _GITHUB_REPO_RE.match(cleaned)
+    ):
+        raise ValueError(f"Invalid GitHub repository identifier: {repo!r}")
+    return cleaned
+
+
+def validate_github_tag(tag: str) -> str:
+    """Validate GitHub Release tag to prevent gh CLI flag injection."""
+    cleaned = (tag or "episodes").strip()
+    if (
+        not cleaned
+        or "\x00" in cleaned
+        or cleaned.startswith("-")
+        or ".." in cleaned
+        or not _GITHUB_TAG_RE.match(cleaned)
+    ):
+        raise ValueError(f"Invalid GitHub release tag: {tag!r}")
+    return cleaned
+
+
+def sanitize_bitrate(bitrate: str, default: str = "192k") -> str:
+    """Validate MP3 bitrate string (e.g. '192k', '256k')."""
+    cleaned = (bitrate or "").strip()
+    if _BITRATE_RE.match(cleaned):
+        return cleaned.lower()
+    return default
+
+
+def _atomic_write_text(target: Path, content: str) -> None:
+    """Atomically write UTF-8 text to target using a sibling temporary file + os.replace."""
+    target = Path(target)
+    if "\x00" in str(target):
+        raise ValueError("Null byte in target path.")
+    existing_mode = None
+    if target.exists():
+        st = target.stat()
+        if stat.S_ISDIR(st.st_mode):
+            raise IsADirectoryError(f"Cannot overwrite directory: {target}")
+        if not stat.S_ISREG(st.st_mode):
+            raise ValueError(f"Refusing to overwrite non-regular file: {target}")
+        existing_mode = stat.S_IMODE(st.st_mode) & 0o777
+
+    parent = target.parent
+    parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=str(parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        os.chmod(tmp_path, existing_mode if existing_mode is not None else 0o644)
+        os.replace(tmp_path, str(target))
+    except Exception:
+        try:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+# ----------------------------------------------------------------------------
 # Config
 # ----------------------------------------------------------------------------
 def load_config(folder: Path) -> Dict:
@@ -103,19 +228,25 @@ def load_config(folder: Path) -> Dict:
             path = legacy_path
     if path.is_file():
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
-                cfg.update(data)
+            st = path.stat()
+            if stat.S_ISREG(st.st_mode) and st.st_size <= 10 * 1024 * 1024:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    cfg.update(data)
         except (OSError, ValueError):
             pass
     if not isinstance(cfg.get("tracks"), dict):
         cfg["tracks"] = {}
+    try:
+        cfg["output_name"] = sanitize_output_name(str(cfg.get("output_name") or "feed.xml"))
+    except ValueError:
+        cfg["output_name"] = "feed.xml"
     return cfg
 
 
 def save_config(folder: Path, cfg: Dict) -> None:
     path = Path(folder) / CONFIG_NAME
-    path.write_text(json.dumps(cfg, indent=2, sort_keys=True), encoding="utf-8")
+    _atomic_write_text(path, json.dumps(cfg, indent=2, sort_keys=True))
 
 
 # ----------------------------------------------------------------------------
@@ -123,16 +254,24 @@ def save_config(folder: Path, cfg: Dict) -> None:
 # ----------------------------------------------------------------------------
 def read_title_and_duration(path: Path):
     title, duration = None, None
+    try:
+        st = Path(path).stat()
+        if not stat.S_ISREG(st.st_mode):
+            return None, None
+    except OSError:
+        return None, None
+
+    abs_path = os.path.abspath(str(path))
     if TinyTag is not None:
         try:
-            tag = TinyTag.get(str(path))
+            tag = TinyTag.get(abs_path)
             title = tag.title or None
             duration = tag.duration or None
         except Exception:
             pass
-    if duration is None and path.suffix.lower() == ".wav":
+    if duration is None and Path(abs_path).suffix.lower() == ".wav":
         try:
-            with wave.open(str(path), "rb") as w:
+            with wave.open(abs_path, "rb") as w:
                 rate = w.getframerate()
                 if rate:
                     duration = w.getnframes() / float(rate)
@@ -142,11 +281,13 @@ def read_title_and_duration(path: Path):
         try:
             out = subprocess.run(
                 ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-                 "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
+                 "-of", "default=noprint_wrappers=1:nokey=1", "--", abs_path],
                 capture_output=True, text=True, timeout=10, check=False)
             duration = float(out.stdout.strip()) if out.stdout.strip() else None
         except (OSError, ValueError, subprocess.SubprocessError):
             pass
+    if duration is not None and (not math.isfinite(duration) or duration < 0):
+        duration = None
     return title, duration
 
 
@@ -155,44 +296,68 @@ def scan_folder(folder: Path, cfg: Optional[Dict] = None) -> List[Track]:
     Scans media files in folder directly or inside dedicated subfolders (e.g. tracks/, media/)."""
     folder = Path(folder)
     cfg = cfg or load_config(folder)
-    overrides = cfg.get("tracks", {})
+    raw_overrides = cfg.get("tracks", {})
+    overrides = raw_overrides if isinstance(raw_overrides, dict) else {}
 
     groups: Dict[str, List[Path]] = {}
 
     def consider_file(f: Path):
-        if f.is_file() and not f.name.startswith(".") and f.suffix.lower() in MIME_TYPES:
-            groups.setdefault(f.stem, []).append(f)
+        try:
+            if f.name.startswith(".") or f.suffix.lower() not in MIME_TYPES:
+                return
+            st = f.stat()
+            if stat.S_ISREG(st.st_mode):
+                groups.setdefault(f.stem, []).append(f)
+        except OSError:
+            return
 
     # 1. Check dedicated subfolders first (tracks/, media/, episodes/)
     for sub in ("tracks", "media", "episodes"):
         sub_dir = folder / sub
         if sub_dir.is_dir():
-            for f in sorted(sub_dir.iterdir()):
-                consider_file(f)
+            try:
+                for f in sorted(sub_dir.iterdir()):
+                    consider_file(f)
+            except OSError:
+                pass
 
     # 2. Check the root folder
-    for f in sorted(folder.iterdir()):
-        consider_file(f)
+    try:
+        for f in sorted(folder.iterdir()):
+            consider_file(f)
+    except OSError:
+        pass
 
     tracks = []
     for files in groups.values():
         files.sort(key=lambda p: FORMAT_PREFERENCE.index(p.suffix.lower()))
         chosen = files[0]
-        # Keep the original upload time (earliest file in the group) as pubDate
-        mtime = min(p.stat().st_mtime for p in files)
+        try:
+            chosen_stat = chosen.stat()
+            mtime = min(p.stat().st_mtime for p in files)
+        except OSError:
+            continue
         tag_title, duration = read_title_and_duration(chosen)
         rel_key = chosen.relative_to(folder).as_posix()
-        ov = overrides.get(chosen.name) or overrides.get(rel_key) or overrides.get(files[-1].name) or {}
-        title = ov.get("title") or tag_title or chosen.stem
-        description = ov.get("description") or f"Daily track selection: {title}"
+        raw_ov = overrides.get(chosen.name) or overrides.get(rel_key) or overrides.get(files[-1].name) or {}
+        ov = raw_ov if isinstance(raw_ov, dict) else {}
+        title = str(ov.get("title") or tag_title or chosen.stem)
+        description = str(ov.get("description") or f"Daily track selection: {title}")
         # A recorded publish time keeps pubDate stable across machines/clones
-        if ov.get("pub"):
-            mtime = float(ov["pub"])
+        if ov.get("pub") is not None:
+            try:
+                cand_pub = float(ov["pub"])
+                if math.isfinite(cand_pub) and 0 <= cand_pub <= 32503680000:
+                    mtime = cand_pub
+            except (ValueError, TypeError):
+                pass
+        raw_url = str(ov.get("url") or "")
+        safe_url = sanitize_public_url(raw_url)
         tracks.append(Track(
             path=chosen, title=title, description=description, duration=duration,
-            size=chosen.stat().st_size, mtime=mtime,
+            size=chosen_stat.st_size, mtime=mtime,
             mime=MIME_TYPES[chosen.suffix.lower()], alternates=files[1:],
-            url=ov.get("url") or ""))
+            url=safe_url))
 
     tracks.sort(key=lambda t: t.mtime, reverse=True)
     return tracks
@@ -222,40 +387,44 @@ def _rfc2822(ts: float) -> str:
 
 
 def build_feed_xml(cfg: Dict, tracks: List[Track], folder: Optional[Path] = None) -> str:
-    base = cfg.get("base_url", "").rstrip("/")
+    base = sanitize_public_url(cfg.get("base_url", "")).rstrip("/")
     title = cfg.get("title") or "Untitled Feed"
     x = [
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">',
         "  <channel>",
-        f"    <title>{escape(title)}</title>",
-        f"    <link>{escape(base)}</link>",
-        f"    <language>{escape(cfg.get('language') or 'en-us')}</language>",
-        f"    <description>{escape(cfg.get('description') or title)}</description>",
+        f"    <title>{_xml_escape(title)}</title>",
+        f"    <link>{_xml_escape(base)}</link>",
+        f"    <language>{_xml_escape(cfg.get('language') or 'en-us')}</language>",
+        f"    <description>{_xml_escape(cfg.get('description') or title)}</description>",
         f"    <lastBuildDate>{_rfc2822(datetime.now(timezone.utc).timestamp())}</lastBuildDate>",
         "    <generator>RSSpanel</generator>",
     ]
     if cfg.get("author"):
-        x.append(f"    <itunes:author>{escape(cfg['author'])}</itunes:author>")
-    if cfg.get("image_url"):
-        img = escape(cfg["image_url"])
-        x.append(f'    <itunes:image href="{img}" />')
-        x += ["    <image>", f"      <url>{img}</url>",
-              f"      <title>{escape(title)}</title>", f"      <link>{escape(base)}</link>",
+        x.append(f"    <itunes:author>{_xml_escape(cfg['author'])}</itunes:author>")
+    safe_img_url = sanitize_public_url(cfg.get("image_url") or "")
+    if safe_img_url:
+        img_attr = _attr_escape(safe_img_url)
+        img_body = _xml_escape(safe_img_url)
+        x.append(f'    <itunes:image href="{img_attr}" />')
+        x += ["    <image>", f"      <url>{img_body}</url>",
+              f"      <title>{_xml_escape(title)}</title>", f"      <link>{_xml_escape(base)}</link>",
               "    </image>"]
     if cfg.get("category"):
-        x.append(f'    <itunes:category text="{escape(cfg["category"])}" />')
+        x.append(f'    <itunes:category text="{_attr_escape(cfg["category"])}" />')
     x.append(f"    <itunes:explicit>{'true' if cfg.get('explicit') else 'false'}</itunes:explicit>")
 
     for t in tracks:
-        url = escape(track_url(cfg, t, folder))
+        raw_t_url = track_url(cfg, t, folder)
+        url_attr = _attr_escape(raw_t_url)
+        url_body = _xml_escape(raw_t_url)
         x += [
             "    <item>",
-            f"      <title>{escape(t.title)}</title>",
-            f"      <description>{escape(t.description)}</description>",
+            f"      <title>{_xml_escape(t.title)}</title>",
+            f"      <description>{_xml_escape(t.description)}</description>",
             f"      <pubDate>{_rfc2822(t.mtime)}</pubDate>",
-            f'      <enclosure url="{url}" length="{t.size}" type="{t.mime}" />',
-            f'      <guid isPermaLink="false">{url}</guid>',
+            f'      <enclosure url="{url_attr}" length="{int(t.size)}" type="{_attr_escape(t.mime)}" />',
+            f'      <guid isPermaLink="false">{url_body}</guid>',
         ]
         if t.duration:
             s = int(round(t.duration))
@@ -269,36 +438,44 @@ def build_feed_xml(cfg: Dict, tracks: List[Track], folder: Optional[Path] = None
 def track_url(cfg: Dict, t: Track, folder: Optional[Path] = None) -> str:
     """Public URL of a track: hosted override (e.g. GitHub Release) or base_url/file."""
     if t.url:
-        return t.url
-    base = cfg.get("base_url", "").rstrip("/")
+        safe_override = sanitize_public_url(t.url)
+        if safe_override:
+            return safe_override
+    base = sanitize_public_url(cfg.get("base_url", "")).rstrip("/")
     if folder:
         try:
             rel = t.path.relative_to(folder).as_posix()
-            return f"{base}/{quote(rel)}"
+            return f"{base}/{quote(rel)}" if base else quote(rel)
         except ValueError:
             pass
-    return f"{base}/{quote(t.name)}"
+    return f"{base}/{quote(t.name)}" if base else quote(t.name)
 
 
 def write_feed(folder: Path, cfg: Optional[Dict] = None) -> Path:
-    folder = Path(folder)
+    folder = Path(folder).resolve()
     cfg = cfg or load_config(folder)
+    out_name = sanitize_output_name(str(cfg.get("output_name") or "feed.xml"))
     tracks = scan_folder(folder, cfg)
-    out = folder / (cfg.get("output_name") or "feed.xml")
-    out.write_text(build_feed_xml(cfg, tracks, folder=folder), encoding="utf-8")
+    out = (folder / out_name).resolve()
+    if out.parent != folder:
+        raise ValueError(f"Output path escapes feed folder: {out}")
+    _atomic_write_text(out, build_feed_xml(cfg, tracks, folder=folder))
     if cfg.get("github_repo"):
-        (folder / "index.html").write_text(build_index_html(cfg, tracks, folder=folder), encoding="utf-8")
+        _atomic_write_text(folder / "index.html", build_index_html(cfg, tracks, folder=folder))
     return out
 
 
 def build_index_html(cfg: Dict, tracks: List[Track], folder: Optional[Path] = None) -> str:
     """A sleek neon landing page for GitHub Pages with responsive video previews."""
-    title = escape(cfg.get("title") or "Feed")
-    feed = escape(f"{cfg.get('base_url', '').rstrip('/')}/{cfg.get('output_name') or 'feed.xml'}")
+    title_text = cfg.get("title") or "Feed"
+    title = _xml_escape(title_text)
+    title_attr = _attr_escape(title_text)
+    base = sanitize_public_url(cfg.get("base_url", "")).rstrip("/")
+    out_name = sanitize_output_name(str(cfg.get("output_name") or "feed.xml"))
+    feed = _attr_escape(f"{base}/{out_name}" if base else out_name)
     items = []
-    base = cfg.get("base_url", "").rstrip("/")
     for t in tracks:
-        url = escape(track_url(cfg, t, folder))
+        url = _attr_escape(track_url(cfg, t, folder))
         if t.is_video:
             poster_file = f"{t.path.stem}_poster.jpg"
             p_same = t.path.parent / poster_file
@@ -311,27 +488,28 @@ def build_index_html(cfg: Dict, tracks: List[Track], folder: Optional[Path] = No
                         rel = p_same.name
                 else:
                     rel = f"{t.path.parent.name}/{poster_file}" if t.path.parent.name in ("tracks", "media", "episodes") else poster_file
-                poster_attr = f' poster="{base}/{quote(rel)}"'
+                poster_url = f"{base}/{quote(rel)}" if base else quote(rel)
             elif p_root and p_root.is_file():
-                poster_attr = f' poster="{base}/{quote(poster_file)}"'
+                poster_url = f"{base}/{quote(poster_file)}" if base else quote(poster_file)
             else:
                 rel = f"{t.path.parent.name}/{poster_file}" if t.path.parent.name in ("tracks", "media", "episodes") else poster_file
-                poster_attr = f' poster="{base}/{quote(rel)}"'
+                poster_url = f"{base}/{quote(rel)}" if base else quote(rel)
+            poster_attr = f' poster="{_attr_escape(poster_url)}"'
             player = (
                 f'<video controls preload="metadata"{poster_attr}>\n'
                 f'      <source src="{url}" type="video/mp4">\n'
-                f'      <p><a href="{url}" class="download-link">Watch / Download {escape(t.name)}</a></p>\n'
+                f'      <p><a href="{url}" class="download-link">Watch / Download {_xml_escape(t.name)}</a></p>\n'
                 f'    </video>'
             )
         else:
             player = f'<audio controls preload="metadata" src="{url}"></audio>'
         items.append(
             f'  <article>\n'
-            f'    <h2>{escape(t.title)}</h2>\n'
+            f'    <h2>{_xml_escape(t.title)}</h2>\n'
             f'    <p class="meta">{datetime.fromtimestamp(t.mtime).strftime("%B %d, %Y")}'
             f' &middot; {fmt_duration(t.duration)} &middot; {fmt_size(t.size)}</p>\n'
             f'    {player}\n'
-            f'    <p class="desc">{escape(t.description)}</p>\n'
+            f'    <p class="desc">{_xml_escape(t.description)}</p>\n'
             f'  </article>'
         )
     return f"""<!DOCTYPE html>
@@ -340,7 +518,7 @@ def build_index_html(cfg: Dict, tracks: List[Track], folder: Optional[Path] = No
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{title}</title>
-  <link rel="alternate" type="application/rss+xml" title="{title}" href="{feed}">
+  <link rel="alternate" type="application/rss+xml" title="{title_attr}" href="{feed}">
   <style>
     :root {{
       --bg: #0b0f19;
@@ -411,25 +589,39 @@ def build_index_html(cfg: Dict, tracks: List[Track], folder: Optional[Path] = No
 
 def make_cover_command(video: Path, out: Path, size: int = 1400) -> List[str]:
     """ffmpeg command: grab a frame and fit it on a square dark canvas."""
-    vf = (f"scale={size}:{size}:force_original_aspect_ratio=decrease,"
-          f"pad={size}:{size}:(ow-iw)/2:(oh-ih)/2:color=0x0b0f19")
-    return ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-ss", "5", "-i", str(video),
-            "-frames:v", "1", "-vf", vf, "-q:v", "3", str(out)]
+    if "\x00" in str(video) or "\x00" in str(out):
+        raise ValueError("Null byte in ffmpeg file path.")
+    safe_size = max(64, min(4096, int(size)))
+    abs_video = os.path.abspath(str(video))
+    abs_out = os.path.abspath(str(out))
+    vf = (f"scale={safe_size}:{safe_size}:force_original_aspect_ratio=decrease,"
+          f"pad={safe_size}:{safe_size}:(ow-iw)/2:(oh-ih)/2:color=0x0b0f19")
+    return ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-ss", "5", "-i", abs_video,
+            "-frames:v", "1", "-vf", vf, "-q:v", "3", abs_out]
 
 
 def mp4_compress_command(src: Path, dst: Path, crf: int = 23) -> List[str]:
     """ffmpeg command: re-encode video to H.264/AAC with faststart for streaming."""
-    return ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(src),
-            "-c:v", "libx264", "-crf", str(crf), "-preset", "medium",
-            "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", str(dst)]
+    if "\x00" in str(src) or "\x00" in str(dst):
+        raise ValueError("Null byte in ffmpeg file path.")
+    safe_crf = max(0, min(51, int(crf)))
+    abs_src = os.path.abspath(str(src))
+    abs_dst = os.path.abspath(str(dst))
+    return ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", abs_src,
+            "-c:v", "libx264", "-crf", str(safe_crf), "-preset", "medium",
+            "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", abs_dst]
 
 
 def extract_mp3_command(src: Path, bitrate: str = "192k") -> List[str]:
     """ffmpeg command: extract/convert audio to MP3."""
-    dst = src.with_suffix(".mp3")
-    return ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(src),
-            "-vn", "-codec:a", "libmp3lame", "-b:a", bitrate,
-            "-metadata", f"title={src.stem}", str(dst)]
+    if "\x00" in str(src):
+        raise ValueError("Null byte in ffmpeg file path.")
+    src_path = Path(os.path.abspath(str(src)))
+    dst_path = src_path.with_suffix(".mp3")
+    safe_bitrate = sanitize_bitrate(bitrate)
+    return ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(src_path),
+            "-vn", "-codec:a", "libmp3lame", "-b:a", safe_bitrate,
+            "-metadata", f"title={src_path.stem}", str(dst_path)]
 
 
 # ----------------------------------------------------------------------------
@@ -449,11 +641,17 @@ def sync_github(folder: Path, log_fn=print) -> bool:
     """
     folder = Path(folder).resolve()
     cfg = load_config(folder)
-    repo = (cfg.get("github_repo") or "").strip()
-    tag = (cfg.get("github_release_tag") or "episodes").strip()
+    raw_repo = (cfg.get("github_repo") or "").strip()
+    raw_tag = (cfg.get("github_release_tag") or "episodes").strip()
 
-    if not repo:
+    if not raw_repo:
         log_fn("No github_repo configured in .rsspanel.json")
+        return False
+    try:
+        repo = validate_github_repo(raw_repo)
+        tag = validate_github_tag(raw_tag)
+    except ValueError as exc:
+        log_fn(f"Invalid GitHub configuration: {exc}")
         return False
 
     tracks = scan_folder(folder, cfg)
@@ -574,10 +772,14 @@ def sync_github(folder: Path, log_fn=print) -> bool:
 
 
 def wav_to_mp3_command(src: Path, bitrate: str = "192k") -> List[str]:
-    dst = src.with_suffix(".mp3")
-    return ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(src),
-            "-codec:a", "libmp3lame", "-b:a", bitrate,
-            "-metadata", f"title={src.stem}", str(dst)]
+    if "\x00" in str(src):
+        raise ValueError("Null byte in ffmpeg file path.")
+    src_path = Path(os.path.abspath(str(src)))
+    dst_path = src_path.with_suffix(".mp3")
+    safe_bitrate = sanitize_bitrate(bitrate)
+    return ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(src_path),
+            "-codec:a", "libmp3lame", "-b:a", safe_bitrate,
+            "-metadata", f"title={src_path.stem}", str(dst_path)]
 
 
 if __name__ == "__main__":

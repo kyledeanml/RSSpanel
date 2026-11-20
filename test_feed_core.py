@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Unit tests for RSSpanel's feed_core module."""
 
+import json
 import os
+import stat
 import struct
 import tempfile
 import unittest
@@ -122,6 +124,148 @@ class FeedCoreTests(unittest.TestCase):
             "https://github.com/example/my-podcast-feed/releases/download/episodes/Blue.Grunge.mp4",
         )
         self.assertTrue((self.dir / "index.html").is_file())
+
+
+class TestSecurityAndIntegrityHardening(unittest.TestCase):
+    """Penetration, attack-vector, and robustness tests for RSSpanel."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_xml_and_html_attribute_injection_and_control_char_sanitization(self):
+        make_wav(self.dir / "episode1.wav", seconds=1)
+        cfg = feed_core.load_config(self.dir)
+        cfg["title"] = 'My "Podcast"\x00\x07 <script>alert(1)</script>'
+        cfg["category"] = 'Music" onmouseover="alert(1)'
+        cfg["image_url"] = 'https://example.com/cover.jpg" onerror="alert(1)'
+        cfg["github_repo"] = "owner/repo"
+        cfg["tracks"] = {
+            "episode1.wav": {
+                "title": "Track \x01\x1f \"One\"",
+                "description": "Desc with \x00 control & <tags>",
+            }
+        }
+        out = feed_core.write_feed(self.dir, cfg)
+        xml_text = out.read_text(encoding="utf-8")
+        # Must parse as valid XML 1.0 despite control chars and double quotes in attributes
+        dom = xml.dom.minidom.parseString(xml_text)
+        cat_el = dom.getElementsByTagName("itunes:category")[0]
+        self.assertEqual(cat_el.getAttribute("text"), 'Music" onmouseover="alert(1)')
+        self.assertNotIn("\x00", xml_text)
+        self.assertNotIn("\x07", xml_text)
+
+        html_text = (self.dir / "index.html").read_text(encoding="utf-8")
+        self.assertNotIn("<script>alert(1)</script>", html_text)
+        self.assertIn("&quot;Podcast&quot;", html_text)
+
+    def test_xss_javascript_and_data_url_schemes_blocked(self):
+        for bad_url in (
+            "javascript:alert(1)",
+            "JAVASCRIPT:alert(document.cookie)",
+            "data:text/html,<script>alert(1)</script>",
+            "vbscript:msgbox(1)",
+            "file:///etc/passwd",
+        ):
+            self.assertEqual(feed_core.sanitize_public_url(bad_url), "")
+
+        self.assertEqual(
+            feed_core.sanitize_public_url("https://example.com/podcast"),
+            "https://example.com/podcast",
+        )
+
+        make_wav(self.dir / "track.wav", seconds=1)
+        cfg = feed_core.load_config(self.dir)
+        cfg["base_url"] = "javascript:alert(1)"
+        cfg["image_url"] = "javascript:alert(2)"
+        cfg["github_repo"] = "owner/repo"
+        cfg["tracks"] = {"track.wav": {"url": "javascript:alert(3)"}}
+        out = feed_core.write_feed(self.dir, cfg)
+        xml_text = out.read_text(encoding="utf-8")
+        html_text = (self.dir / "index.html").read_text(encoding="utf-8")
+        self.assertNotIn("javascript:", xml_text.lower())
+        self.assertNotIn("javascript:", html_text.lower())
+
+    def test_output_name_path_traversal_blocked(self):
+        for bad_name in (
+            "../../evil.xml",
+            "../feed.xml",
+            "/tmp/evil.xml",
+            "sub/feed.xml",
+            ".rsspanel.json",
+            ".hidden.xml",
+            "-flag.xml",
+            "not_xml.sh",
+            "bad\x00.xml",
+        ):
+            with self.assertRaises(ValueError):
+                feed_core.sanitize_output_name(bad_name)
+
+        self.assertEqual(feed_core.sanitize_output_name("podcast.xml"), "podcast.xml")
+        self.assertEqual(feed_core.sanitize_output_name("feed.rss"), "feed.rss")
+
+        # Malicious output_name in .rsspanel.json is automatically sanitized on load_config
+        (self.dir / ".rsspanel.json").write_text(
+            json.dumps({"output_name": "../../pwn.xml"}), encoding="utf-8"
+        )
+        cfg = feed_core.load_config(self.dir)
+        self.assertEqual(cfg["output_name"], "feed.xml")
+
+    def test_non_regular_files_fifo_and_malformed_overrides_resilience(self):
+        make_wav(self.dir / "valid.wav", seconds=1)
+        fifo_path = self.dir / "trap.wav"
+        os.mkfifo(fifo_path)
+
+        # Malformed track overrides (non-dict entry, NaN pub, huge negative pub)
+        cfg = feed_core.load_config(self.dir)
+        cfg["tracks"] = {
+            "valid.wav": {"title": "Safe Track", "pub": "not-a-timestamp"},
+            "other.wav": "malformed-string-instead-of-dict",
+        }
+        tracks = feed_core.scan_folder(self.dir, cfg)
+        self.assertEqual(len(tracks), 1)
+        self.assertEqual(tracks[0].name, "valid.wav")
+        self.assertEqual(tracks[0].title, "Safe Track")
+
+        # read_title_and_duration on FIFO returns (None, None) immediately without blocking
+        self.assertEqual(feed_core.read_title_and_duration(fifo_path), (None, None))
+
+    def test_github_and_ffmpeg_cli_injection_hardening(self):
+        for bad_repo in ("--help", "-repo/name", "owner/../repo", "owner/repo;rm -rf /", "justowner", "bad\x00/repo"):
+            with self.assertRaises(ValueError):
+                feed_core.validate_github_repo(bad_repo)
+        self.assertEqual(feed_core.validate_github_repo("kyledeanml/RSSpanel"), "kyledeanml/RSSpanel")
+
+        for bad_tag in ("--upload", "-n", "../tag", "tag with spaces", "bad\x00tag"):
+            with self.assertRaises(ValueError):
+                feed_core.validate_github_tag(bad_tag)
+        self.assertEqual(feed_core.validate_github_tag("episodes_v1.0"), "episodes_v1.0")
+
+        # Invalid bitrate falls back to 192k
+        self.assertEqual(feed_core.sanitize_bitrate("192k; rm -rf /"), "192k")
+        self.assertEqual(feed_core.sanitize_bitrate("256K"), "256k")
+
+        # Dash-prefixed relative path is normalized to absolute path in ffmpeg commands
+        cmd = feed_core.extract_mp3_command(Path("-malicious.wav"), bitrate="--invalid")
+        i_idx = cmd.index("-i") + 1
+        b_idx = cmd.index("-b:a") + 1
+        self.assertTrue(os.path.isabs(cmd[i_idx]))
+        self.assertEqual(cmd[b_idx], "192k")
+
+    def test_atomic_config_and_feed_writes_preserve_permissions(self):
+        make_wav(self.dir / "ep.wav", seconds=1)
+        cfg = feed_core.load_config(self.dir)
+        feed_core.save_config(self.dir, cfg)
+        cfg_path = self.dir / ".rsspanel.json"
+        os.chmod(cfg_path, 0o600)
+        feed_core.save_config(self.dir, cfg)
+        self.assertEqual(stat.S_IMODE(cfg_path.stat().st_mode), 0o600)
+
+        out = feed_core.write_feed(self.dir, cfg)
+        self.assertEqual(stat.S_IMODE(out.stat().st_mode), 0o644)
 
 
 if __name__ == "__main__":
